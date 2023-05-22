@@ -9,6 +9,9 @@ from torchvision import transforms
 from facenet_pytorch import MTCNN
 
 import streamlit as st
+from streamlit_webrtc import webrtc_streamer, VideoHTMLAttributes
+import threading
+import av
 
 
 def cvt_age(age):
@@ -208,56 +211,76 @@ def draw(frame, boxes, probs, pclass):
     for box, prob in zip(boxes, probs):
         # cropped_frame = frame[int(boxes[0][1]):int(boxes[0][3]), int(boxes[0][0]):int(boxes[0][2])]
         cv2.rectangle(frame, (int(box[0]), int(box[1])), (int(
-            box[2]), int(box[3])), (0, 0, 255), thickness=2)
+            box[2]), int(box[3])), (255, 255, 0), thickness=2)
         cv2.putText(frame, pclass, (int(box[2]), int(
-            box[3])), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
+            box[3])), cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 0), 1, cv2.LINE_AA)
 
     return frame
 
 
-st.title("Webcam Live Feed")
-run = st.checkbox('Run')
-FRAME_WINDOW = st.image([])
-camera = cv2.VideoCapture(0)
 mtcnn = MTCNN()
 
-while run:
-    pclass = "predicting..."
-    frame_count = 0
-    predict_threshold = 120
-    can_age = []
-    can_eth = []
-    can_gen = []
+lock = threading.Lock()
+state = {
+    "frame_count": 0,
+    "pclass": "predicting...",
+    "predict_threshold": 120,
+    "can_age": [],
+    "can_eth": [],
+    "can_gen": []
 
-    while True:
-        ret, frame = camera.read()
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+}
+
+
+def callback(vframe):
+
+    frame = vframe.to_ndarray(format="bgr24")
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    # with lock:
+    #     print(state["frame_count"])
+    try:
 
         boxes, probs = mtcnn.detect(frame)
 
-        if frame_count < predict_threshold:
-            pclass = "predicting..." + \
-                str(round(frame_count/predict_threshold * 100, 2)) + "%"
-            cropped_framed = frame[int(boxes[0][1]):int(
-                boxes[0][3]), int(boxes[0][0]):int(boxes[0][2])]
-            age, eth, gen = predictClass(cropped_framed, model)
-            can_age.append(age)
-            can_eth.append(eth)
-            can_gen.append(gen)
+    # if frame_count < predict_threshold:
+    #     pclass = "predicting..." + \
+    #         str(round(frame_count/predict_threshold * 100, 2)) + "%"
+    #     cropped_framed = frame[int(boxes[0][1]):int(
+    #         boxes[0][3]), int(boxes[0][0]):int(boxes[0][2])]
+    #     age, eth, gen = predictClass(cropped_framed, model)
+    #     can_age.append(age)
+    #     can_eth.append(eth)
+    #     can_gen.append(gen)
 
-        elif frame_count == predict_threshold:
-            predicted_age = cvt_age(
-                max(set(can_age), key=can_age.count))
-            predicted_eth = cvt_ethnicity(
-                max(set(can_eth), key=can_eth.count))
-            predicted_gen = cvt_gender(
-                max(set(can_gen), key=can_gen.count))
-            pclass = predicted_age + " " + predicted_eth + " " + predicted_gen
+    # elif frame_count == predict_threshold:
+    #     predicted_age = cvt_age(
+    #         max(set(can_age), key=can_age.count))
+    #     predicted_eth = cvt_ethnicity(
+    #         max(set(can_eth), key=can_eth.count))
+    #     predicted_gen = cvt_gender(
+    #         max(set(can_gen), key=can_gen.count))
+    #     pclass = predicted_age + " " + predicted_eth + " " + predicted_gen
 
+        cropped_framed = frame[int(boxes[0][1]):int(
+            boxes[0][3]), int(boxes[0][0]):int(boxes[0][2])]
+        age, eth, gen = predictClass(cropped_framed, model)
+        pclass = f'{str(cvt_age(age))} {str(cvt_ethnicity(eth))} {str(cvt_gender(gen))}'
+        # frame_count += 1
         frame = draw(frame, boxes, probs, pclass)
 
-        FRAME_WINDOW.image(frame)
-        frame_count += 1
+    except:
+        pass
 
-else:
-    st.write('Stopped')
+    with lock:
+        state["frame_count"] = state["frame_count"] + 1
+
+    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    return av.VideoFrame.from_ndarray(frame, format="bgr24")
+
+
+st.title("Face Appearance Prediction")
+FRAME_WINDOW = st.image([])
+
+
+webrtc_streamer(key="example", video_frame_callback=callback, video_html_attrs=VideoHTMLAttributes(
+    autoPlay=True, controls=False, style={"width": "100%"}, muted=True))
