@@ -236,36 +236,45 @@ def callback(vframe):
 
     frame = vframe.to_ndarray(format="bgr24")
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    # with lock:
-    #     print(state["frame_count"])
-    try:
+    with lock:
+        frame_count = state["frame_count"]
+        pclass = state["pclass"]
+        predict_threshold = state["predict_threshold"]
 
+    try:
         boxes, probs = mtcnn.detect(frame)
 
-    # if frame_count < predict_threshold:
-    #     pclass = "predicting..." + \
-    #         str(round(frame_count/predict_threshold * 100, 2)) + "%"
-    #     cropped_framed = frame[int(boxes[0][1]):int(
-    #         boxes[0][3]), int(boxes[0][0]):int(boxes[0][2])]
-    #     age, eth, gen = predictClass(cropped_framed, model)
-    #     can_age.append(age)
-    #     can_eth.append(eth)
-    #     can_gen.append(gen)
+        if frame_count < predict_threshold:
+            pclass = "predicting..." + \
+                str(round(frame_count/predict_threshold * 100, 2)) + "%"
+            cropped_framed = frame[int(boxes[0][1]):int(
+                boxes[0][3]), int(boxes[0][0]):int(boxes[0][2])]
+            age, eth, gen = predictClass(cropped_framed, model)
+            with lock:
+                state["can_age"].append(age)
+                state["can_eth"].append(eth)
+                state["can_gen"].append(gen)
 
-    # elif frame_count == predict_threshold:
-    #     predicted_age = cvt_age(
-    #         max(set(can_age), key=can_age.count))
-    #     predicted_eth = cvt_ethnicity(
-    #         max(set(can_eth), key=can_eth.count))
-    #     predicted_gen = cvt_gender(
-    #         max(set(can_gen), key=can_gen.count))
-    #     pclass = predicted_age + " " + predicted_eth + " " + predicted_gen
+        elif frame_count == predict_threshold:
+            with lock:
+                can_age = state["can_age"]
+                can_eth = state["can_eth"]
+                can_gen = state["can_gen"]
+            predicted_age = cvt_age(
+                max(set(can_age), key=can_age.count))
+            predicted_eth = cvt_ethnicity(
+                max(set(can_eth), key=can_eth.count))
+            predicted_gen = cvt_gender(
+                max(set(can_gen), key=can_gen.count))
 
-        cropped_framed = frame[int(boxes[0][1]):int(
-            boxes[0][3]), int(boxes[0][0]):int(boxes[0][2])]
-        age, eth, gen = predictClass(cropped_framed, model)
-        pclass = f'{str(cvt_age(age))} {str(cvt_ethnicity(eth))} {str(cvt_gender(gen))}'
-        # frame_count += 1
+            with lock:
+                state["pclass"] = predicted_age + " " + \
+                    predicted_eth + " " + predicted_gen
+
+        # cropped_framed = frame[int(boxes[0][1]):int(
+        #     boxes[0][3]), int(boxes[0][0]):int(boxes[0][2])]
+        # age, eth, gen = predictClass(cropped_framed, model)
+        # pclass = f'{str(cvt_age(age))} {str(cvt_ethnicity(eth))} {str(cvt_gender(gen))}'
         frame = draw(frame, boxes, probs, pclass)
 
     except:
@@ -279,8 +288,12 @@ def callback(vframe):
 
 
 st.title("Face Appearance Prediction")
+state["predict_threshold"] = st.slider(
+    "Prediction Frames", min_value=30, max_value=240, step=1, value=30)
 FRAME_WINDOW = st.image([])
 
 
 webrtc_streamer(key="example", video_frame_callback=callback, video_html_attrs=VideoHTMLAttributes(
     autoPlay=True, controls=False, style={"width": "100%"}, muted=True))
+
+# %%
